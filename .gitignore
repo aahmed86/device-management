@@ -19,3 +19,16 @@ gradle-app.setting
 .project
 # JDT-specific (Eclipse Java Development Tools)
 .classpath
+
+# H2 Database files
+data/
+*.mv.db
+*.trace.db
+
+# IntelliJ IDEA files
+.idea/
+*.iml
+out/
+
+# Log files
+*.log
