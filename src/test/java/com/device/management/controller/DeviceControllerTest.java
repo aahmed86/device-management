@@ -27,7 +27,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(DeviceController.class)
-@ActiveProfiles("test")
 class DeviceControllerTest {
 
     @Autowired
@@ -51,6 +50,7 @@ class DeviceControllerTest {
                     d.getName(),
                     d.getBrand(),
                     d.getState(),
+                    null,
                     null
             );
         });

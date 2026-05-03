@@ -8,5 +8,6 @@ public record DeviceResponse(
         String name,
         String brand,
         DeviceState state,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        Long version
 ) {}

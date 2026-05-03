@@ -12,7 +12,9 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sa -d devicedb"]
       interval: 10s
+      timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   app:
     build: .
@@ -22,9 +24,18 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/devicedb
       SPRING_DATASOURCE_USERNAME: sa
       DB_PASSWORD: ${DB_PASSWORD:-password}
+      # Uncomment to override log level without rebuilding the image
+      # LOGGING_LEVEL_COM_DEVICE_MANAGEMENT: DEBUG
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1" ]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    restart: unless-stopped
 
 volumes:
   pgdata:

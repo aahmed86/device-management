@@ -31,7 +31,8 @@ public class DeviceMapper {
                 device.getName(),
                 device.getBrand(),
                 device.getState(),
-                device.getCreatedAt()
+                device.getCreatedAt(),
+                device.getVersion()
         );
     }
 }

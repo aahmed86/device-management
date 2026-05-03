@@ -1,8 +1,9 @@
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '3.4.5'
+    id 'org.springframework.boot' version '3.5.14'
     id 'io.spring.dependency-management' version '1.1.7'
     id 'jacoco'
+    id 'org.owasp.dependencycheck' version '12.1.3'
 }
 
 group = 'com.device.management'
@@ -21,18 +22,24 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
 
     // API Documentation
-    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.5'
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.17'
 
     // Persistence
     runtimeOnly 'org.postgresql:postgresql'
-    testRuntimeOnly 'com.h2database:h2'
-
     implementation 'org.flywaydb:flyway-database-postgresql'
+
+    // H2 — needed at runtime for dev profile AND during tests
+    runtimeOnly 'com.h2database:h2'
 
     // Testing
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+
+    // Explicit Patches for CVEs
+    implementation 'org.apache.commons:commons-lang3:3.18.0'
+    implementation 'org.postgresql:postgresql:42.7.11'
 }
 
 springBoot {
@@ -40,7 +47,7 @@ springBoot {
 }
 
 jacoco {
-    toolVersion = "0.8.11"
+    toolVersion = "0.8.12"
 }
 
 test {
@@ -54,4 +61,38 @@ jacocoTestReport {
         html.required = true
         xml.required = true
     }
+
+    // Exclude boilerplate classes that don't need coverage targets
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: [
+                    '**/DeviceManagementApplication.class',
+                    '**/dto/**',
+                    '**/model/**',
+                    '**/common/**'
+            ])
+        }))
+    }
+}
+
+// Fail the build if coverage drops below threshold
+jacocoTestCoverageVerification {
+    violationRules {
+        rule {
+            limit {
+                minimum = 0.80   // 80% instruction coverage required
+            }
+        }
+    }
+}
+
+// Run coverage check after tests: ./gradlew test jacocoTestCoverageVerification
+check.dependsOn jacocoTestCoverageVerification
+
+// ── OWASP Dependency Check ────────────────────────────────────────────────────
+dependencyCheck {
+    // Fail build if any CVE with CVSS score >= 7 (High) is found
+    failBuildOnCVSS = 7
+    suppressionFile = 'owasp-suppressions.xml'   // create this file to suppress false positives
+    formats = ['HTML', 'JSON']
 }
