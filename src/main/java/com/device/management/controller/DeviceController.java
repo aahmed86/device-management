@@ -1,13 +1,14 @@
 package com.device.management.controller;
 
+import com.device.management.common.DeviceState;
 import com.device.management.dto.DevicePatchRequest;
+import com.device.management.dto.DeviceRequest;
 import com.device.management.dto.DeviceResponse;
+import com.device.management.dto.DeviceUpdateRequest;
 import com.device.management.dto.error.ApiError;
 import com.device.management.exception.InvalidFilterCombinationException;
 import com.device.management.mapper.DeviceMapper;
 import com.device.management.model.Device;
-import com.device.management.dto.DeviceRequest;
-import com.device.management.common.DeviceState;
 import com.device.management.service.DeviceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -19,6 +20,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
 import java.util.List;
 
 @Tag(name = "Devices", description = "Device management operations")
@@ -180,10 +182,10 @@ public class DeviceController {
                                      @io.swagger.v3.oas.annotations.parameters.RequestBody(
                                              description = "Full device data for update",
                                              required = true,
-                                             content = @Content(schema = @Schema(implementation = DeviceRequest.class))
+                                             content = @Content(schema = @Schema(implementation = DeviceUpdateRequest.class))
                                      )
-                                     @Valid @RequestBody DeviceRequest device) {
-        return deviceMapper.toResponse(service.updateDevice(id, deviceMapper.toEntity(device)));
+                                     @Valid @RequestBody DeviceUpdateRequest device) {
+        return deviceMapper.toResponse(service.updateDevice(id, deviceMapper.toEntity(device), device.version()));
     }
 
     @Operation(
@@ -234,7 +236,7 @@ public class DeviceController {
                                                 content = @Content(schema = @Schema(implementation = DevicePatchRequest.class))
                                         )
                                         @RequestBody DevicePatchRequest updates) {
-        return deviceMapper.toResponse(service.patchDevice(id, deviceMapper.toEntity(updates)));
+        return deviceMapper.toResponse(service.patchDevice(id, deviceMapper.toEntity(updates), updates.version()));
     }
 
     @Operation(

@@ -1,6 +1,7 @@
 # Device Management API
+
 A RESTful API built with **Spring Boot 3** for managing device resources.  
-The system supports full lifecycle operations including creation, updates, filtering, and deletion — with strict business rule enforcement.
+The system supports full lifecycle operations — creation, updates, filtering, and deletion — with strict business rule enforcement.
 
 ---
 
@@ -10,16 +11,18 @@ The system supports full lifecycle operations including creation, updates, filte
 |---|---|
 | Language | Java 21 |
 | Build tool | Gradle 8.x |
-| Framework | Spring Boot 3.4.x |
+| Framework | Spring Boot 3.5.14 |
 | Web | Spring Web (MVC) |
 | Persistence | Spring Data JPA + Hibernate |
 | Database (prod) | PostgreSQL 16 |
-| Database (dev/test) | H2 (in-memory / file-based) |
+| Database (dev/test) | H2 (file-based / in-memory) |
 | Migrations | Flyway |
 | Validation | Jakarta Bean Validation |
-| API Docs | SpringDoc OpenAPI (Swagger UI) |
+| API Docs | SpringDoc OpenAPI 2.8.17 (Swagger UI) |
+| Monitoring | Spring Boot Actuator |
 | Testing | JUnit 5 + Mockito |
-| Coverage | JaCoCo |
+| Coverage | JaCoCo 0.8.12 |
+| Security scanning | OWASP Dependency-Check |
 | Containerisation | Docker + Docker Compose |
 
 ---
@@ -35,6 +38,7 @@ A Device contains:
 | `brand` | String | Required |
 | `state` | Enum | `AVAILABLE`, `IN_USE`, `INACTIVE` |
 | `createdAt` | LocalDateTime | System-generated, immutable |
+| `version` | Long | Managed by JPA for optimistic locking |
 
 ---
 
@@ -44,8 +48,10 @@ A Device contains:
 - `name` and `brand` **cannot be updated** if the device is `IN_USE`
 - Devices in `IN_USE` state **cannot be deleted**
 - `brand` and `state` query filters are **mutually exclusive** — only one may be used per request
+- Concurrent updates are protected via **optimistic locking** — include `version` in PUT/PATCH to detect stale updates
 
 ---
+
 ## API Endpoints
 
 | Method | Path | Description |
@@ -59,7 +65,7 @@ A Device contains:
 | `PATCH` | `/api/v1/device/{id}` | Partially update a device |
 | `DELETE` | `/api/v1/device/{id}` | Delete a device |
 
-### Example Request Body (POST / PUT)
+### Example — Create (POST)
 
 ```json
 {
@@ -69,36 +75,64 @@ A Device contains:
 }
 ```
 
-### Example PATCH Body (partial fields only)
+### Example — Full update (PUT)
+
+Include `version` from the previous GET response to enable optimistic locking.  
+If the record was modified by another request since you fetched it, you will receive **409 CONCURRENT_MODIFICATION**.
 
 ```json
 {
-  "state": "IN_USE"
+  "name": "iPhone 15 Pro",
+  "brand": "Apple",
+  "state": "IN_USE",
+  "version": 2
 }
 ```
+
+### Example — Partial update (PATCH)
+
+All fields are optional. Only provided fields are changed.  
+Include `version` to opt into optimistic locking on a partial update.
+
+```json
+{ "state": "INACTIVE", "version": 2 }
+```
+
+---
+
+## Optimistic Locking
+
+Every device response includes a `version` field. This is used to detect concurrent modifications:
+
+1. `GET /api/v1/device/1` → `{ ..., "version": 2 }`
+2. `PUT /api/v1/device/1` with `{ ..., "version": 2 }` → succeeds, response contains `"version": 3`
+3. If another client already updated the same device → **409 CONCURRENT_MODIFICATION**
+
+Omitting `version` from PUT/PATCH skips the check — the update is applied unconditionally.
 
 ---
 
 ## Project Profiles
 
-The application uses three Spring profiles:
+| Profile | Purpose | Database | Schema management |
+|---|---|---|---|
+| *(default)* | Production / Docker | PostgreSQL | Flyway migrations (`validate`) |
+| `dev` | Local development | H2 file-based (`./data/devicedb`) | `ddl-auto=update` (persists between restarts) |
+| `test` | Automated tests | H2 in-memory | `ddl-auto=create-drop` (fresh DB per run) |
 
-| Profile     | Purpose | Database |
-|-------------|---|---|
-| *(default)* | Production / Docker | PostgreSQL (via env vars) |
-| `dev`       | Local development | H2 file-based (`./data/devicedb`) |
-| `test`         | Automated tests | H2 in-memory |
+---
+
+## Prerequisites
+
+- Java 21+
+- Gradle 8+ (or use the wrapper: `./gradlew`)
+- Docker + Docker Compose (for PostgreSQL or full-stack runs)
 
 ---
 
 ## Running Locally
 
-### Prerequisites
-
-- Java 21+
-- Gradle 8+ (or use the included wrapper `./gradlew`)
-
-### Option A — Local run with H2 (dev profile, no PostgreSQL needed)
+### Option A — H2 dev profile (no PostgreSQL needed)
 
 This is the easiest way to run locally without Docker or a PostgreSQL installation.
 
@@ -106,15 +140,18 @@ This is the easiest way to run locally without Docker or a PostgreSQL installati
   ./gradlew bootRun --args='--spring.profiles.active=dev'
 ```
 
-The app starts on **http://localhost:8080** and stores data in `./data/devicedb.mv.db`.
+The app starts on **http://localhost:8080** and stores data in `./data/devicedb.mv.db`.  
+Data **persists between restarts** — the file is only recreated if you delete the `data/` folder.
 
-### H2 Console (dev / test profiles)
+> **First run after adding a new entity field:** If you see a column-not-found error, delete the stale file and restart:
+> ```bash
+> rm -rf data/
+> ./gradlew bootRun --args='--spring.profiles.active=dev'
+> ```
 
-When running with `--spring.profiles.active=test`, the H2 console is available at:
+#### H2 Console
 
-**http://localhost:8080/h2-console**
-
-Use these exact credentials:
+Available only with the `dev` profile at **http://localhost:8080/h2-console**
 
 | Field | Value |
 |---|---|
@@ -123,15 +160,14 @@ Use these exact credentials:
 | User Name | `sa` |
 | Password | `password` |
 
-> ⚠️ **Important:** The JDBC URL must match exactly what is in `application-dev.properties`. If the console shows a different URL by default, clear it and type `jdbc:h2:file:./data/devicedb` manually. Do **not** use `jdbc:h2:~/test` or any other default — it will connect to a different empty database.
+> ⚠️ The console pre-fills `jdbc:h2:~/test` by default. You **must** clear it and type `jdbc:h2:file:./data/devicedb` exactly — any other URL connects to a different empty database.
 
-> ⚠️ The H2 console is **disabled** in the default (production) profile. It is only available when running with `dev` or `test` profiles.
+> ⚠️ The H2 console is **disabled** in the production profile.
 
-### Option B — Local run with PostgreSQL (default profile)
-
-1. Start a local PostgreSQL instance (or use Docker for just the DB):
+### Option B — PostgreSQL with Docker (default profile)
 
 ```bash
+  # 1. Start PostgreSQL
   docker run -d \
     --name postgres-local \
     -e POSTGRES_DB=devicedb \
@@ -139,77 +175,68 @@ Use these exact credentials:
     -e POSTGRES_PASSWORD=password \
     -p 5432:5432 \
     postgres:16-alpine
-```
 
-2. Run the application:
-
-```bash
+  # 2. Run the app
   ./gradlew bootRun
 ```
 
-The app will connect to `jdbc:postgresql://localhost:5432/devicedb` using the defaults defined in `application.properties`. Flyway will run the migrations automatically on startup.
+Flyway migrations run automatically on startup. To stop the database:
+
+```bash
+  docker stop postgres-local && docker rm postgres-local
+```
 
 ---
 
-## Running with Docker Compose (Recommended for full stack)
+## Running with Docker Compose (Full Stack — Recommended)
 
-This is the recommended approach — it starts both PostgreSQL and the application together.
-
-### Step 1 — Build and start
+### Start
 
 ```bash
   docker compose up --build
 ```
 
-This will:
-1. Build the Spring Boot application image
-2. Start PostgreSQL with a persistent named volume (`pgdata`)
-3. Wait for PostgreSQL to be healthy before starting the app
-4. Run Flyway migrations automatically on startup
+This will: build the Spring Boot image, start PostgreSQL with a persistent volume, wait for the DB healthcheck, run Flyway migrations, and expose the app at **http://localhost:8080**.
 
-The app is available at **http://localhost:8080**
-
-### Step 2 — Stop
+### Stop
 
 ```bash
   docker compose down
 ```
 
-To also remove the database volume (destroys all data):
+Remove the database volume (destroys all data):
 
 ```bash
   docker compose down -v
 ```
 
-### Using a custom DB password
+### Custom DB password
 
 ```bash
   DB_PASSWORD=mysecurepassword docker compose up --build
 ```
 
-Or create a `.env` file in the project root:
+Or create a `.env` file in the project root (do **not** commit this):
 
 ```env
 DB_PASSWORD=mysecurepassword
 ```
 
-### Rancher Desktop users
+### Rancher Desktop
 
-If you use Rancher Desktop instead of Docker Desktop:
-
-1. In Rancher Desktop → **Preferences** → **Container Engine** → select **`dockerd (moby)`**
-2. All `docker` and `docker compose` commands above work identically
-3. On **Windows**, ensure your project folder is under `C:\Users\` so volume mounts are allowed
+1. **Preferences → Container Engine** → select **`dockerd (moby)`**
+2. All `docker` and `docker compose` commands work identically
+3. On **Windows**, ensure the project folder is under `C:\Users\` for volume mounts
 
 ---
 
-## Building the Docker image manually
+## Building the Docker Image Manually
 
 ```bash
-  # Build image
+  # Build
   docker build -t device-management .
 
-  # Run with PostgreSQL (requires a running PostgreSQL instance)
+  # Run against an external PostgreSQL
   docker run -d \
     -p 8080:8080 \
     -e SPRING_DATASOURCE_URL=jdbc:postgresql://host.docker.internal:5432/devicedb \
@@ -219,7 +246,7 @@ If you use Rancher Desktop instead of Docker Desktop:
     device-management:latest
 ```
 
-> On Linux, replace `host.docker.internal` with your actual host IP or use `--network host`.
+> On Linux, replace `host.docker.internal` with your machine's IP, or use `--network host`.
 
 ```bash
   # Run with H2
@@ -243,9 +270,9 @@ If you use Rancher Desktop instead of Docker Desktop:
   ./gradlew test
 ```
 
-Tests run against the `dev` profile (H2 in-memory) automatically. No external database is required.
+Tests use the `test` profile automatically (H2 in-memory, fresh schema per test). No external database is needed.
 
-To run tests and generate all reports at once:
+Run tests and generate all reports:
 
 ```bash
   ./gradlew clean test jacocoTestReport
@@ -259,9 +286,10 @@ After running `./gradlew clean test jacocoTestReport`, the following reports are
 
 | Report | Path |
 |---|---|
-| **Test results** (HTML) | `build/reports/tests/test/index.html` |
-| **JaCoCo coverage** (HTML) | `build/reports/jacoco/test/html/index.html` |
+| **Test results** | `build/reports/tests/test/index.html` |
+| **JaCoCo coverage** | `build/reports/jacoco/test/html/index.html` |
 | **Build problems** | `build/reports/problems/problems-report.html` |
+| **OWASP CVE scan** | `build/reports/dependency-check-report.html` |
 
 Open any of them directly in your browser:
 
@@ -290,9 +318,34 @@ Once the application is running:
 
 ---
 
+## Health & Monitoring (Actuator)
+
+Spring Boot Actuator is included and exposes the following endpoints:
+
+| Endpoint | URL | Description |
+|---|---|---|
+| Health | http://localhost:8080/actuator/health | App + DB connectivity status |
+| Info | http://localhost:8080/actuator/info | Application name and version |
+
+The `health` endpoint is also used by Docker's `HEALTHCHECK` directive to determine when the container is ready to serve traffic. During `docker compose up`, the app container waits for this endpoint before accepting requests.
+
+Example response:
+
+```json
+{
+  "status": "UP",
+  "components": {
+    "db": { "status": "UP" },
+    "diskSpace": { "status": "UP" }
+  }
+}
+```
+
+---
+
 ## Exception Handling
 
-All errors are returned as a structured `ApiError` JSON body:
+All errors return a structured `ApiError` body:
 
 ```json
 {
@@ -304,35 +357,113 @@ All errors are returned as a structured `ApiError` JSON body:
 }
 ```
 
-| HTTP Status | Error Code | Trigger |
+| Status | Code | Trigger |
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | Missing/invalid request fields |
 | 400 | `INVALID_STATE` | Unknown enum value for state |
 | 400 | `FILTER_CONFLICT` | Both `brand` and `state` filters used together |
 | 404 | `DEVICE_NOT_FOUND` | Device ID does not exist |
 | 409 | `DEVICE_IN_USE` | Update/delete blocked by business rule |
+| 409 | `CONCURRENT_MODIFICATION` | Version mismatch — record was updated by another request |
 | 500 | `INTERNAL_ERROR` | Unexpected server error |
+
+---
+
+## CVE & Dependency Security
+
+```bash
+  ./gradlew dependencyCheckAnalyze
+```
+
+The build fails if any dependency has a CVSS score ≥ 7. Report: `build/reports/dependency-check-report.html`.
+
+Suppress confirmed false positives in `owasp-suppressions.xml`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+    <suppress>
+        <notes>commons-lang3 via swagger-core-jakarta — not reachable in this application</notes>
+        <gav regex="true">^org\.apache\.commons:commons-lang3:.*$</gav>
+    </suppress>
+</suppressions>
+```
 
 ---
 
 ## Key Design Decisions
 
-- **DTO-based API** — entities are never exposed directly; `DeviceRequest` / `DeviceResponse` separate API contract from persistence model
-- **Typed exception hierarchy** — `DeviceException` base class with `ErrorCode` enum avoids stringly-typed error handling
-- **`@Transactional(readOnly = true)`** on the service class by default; write methods override with `@Transactional`
-- **Flyway migrations** — schema is version-controlled in `src/main/resources/db/migration/`; `ddl-auto=validate` in production ensures no silent schema drift
-- **Optimistic locking** — `@Version` field on `Device` prevents lost updates under concurrent modification
+- **DTO-based API** — `DeviceRequest` / `DevicePatchRequest` / `DeviceResponse` keep the API contract separate from the persistence model; entities are never exposed directly
+- **Typed exception hierarchy** — `DeviceException` base class + `ErrorCode` enum drives both HTTP status mapping and the `ApiError` response body
+- **`@Transactional(readOnly = true)` by default** — write methods individually override with `@Transactional`
+- **Flyway migrations** — schema is version-controlled; `ddl-auto=validate` in production catches schema drift without silently altering tables
+- **Optimistic locking** — `@Version` on `Device` prevents lost updates; clients receive `version` in every response and submit it back on mutation requests
+- **Non-root Docker user** — container runs as `appuser`, reducing attack surface
+- **Container-aware JVM flags** — `-XX:+UseContainerSupport` and `-XX:MaxRAMPercentage=75.0` respect container memory limits
 
 ---
 
 ## Future Improvements
 
-- Add authentication (Spring Security + JWT)
-- Add pagination and sorting to `GET /api/v1/device`
-- Add caching layer (Redis) for read-heavy queries
-- Add audit logging (created by / updated by)
-- Event-driven notifications via Kafka on state changes
-- Metrics and health endpoint hardening (Spring Actuator)
+The items below are out of scope for this implementation but represent the natural next steps for a production service.
+
+### Pagination and Sorting *(high value, low effort)*
+
+The current `GET /api/v1/device` returns all records unbounded. For large datasets this needs `Pageable`:
+
+```java
+Page<Device> findAll(Pageable pageable);
+// Usage: GET /api/v1/device?page=0&size=20&sort=brand,asc
+```
+
+### Authentication — Spring Security + JWT *(required before any public deployment)*
+
+All write endpoints should be protected. Read endpoints can remain public or role-gated:
+
+```java
+.authorizeHttpRequests(auth -> auth
+    .requestMatchers(HttpMethod.GET, "/api/v1/device/**").permitAll()
+    .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+    .anyRequest().authenticated())
+```
+
+### Caching — Redis *(high value for read-heavy workloads)*
+
+```java
+@Cacheable(value = "devices", key = "#id")
+public Device getById(Long id) { ... }
+
+@CacheEvict(value = "devices", key = "#id")
+public void deleteDevice(Long id) { ... }
+```
+
+### Audit Logging *(compliance requirement in many environments)*
+
+Track who created and last modified each record using Spring Data's auditing:
+
+```java
+@CreatedBy   private String createdBy;
+@LastModifiedBy private String lastModifiedBy;
+@LastModifiedDate private LocalDateTime updatedAt;
+```
+
+### Actuator Hardening *(recommended before production)*
+
+Move the management port to an internal-only network interface so metrics and health details are not publicly accessible:
+
+```properties
+management.server.port=9090
+management.endpoints.web.exposure.include=health,info,metrics,prometheus
+management.endpoint.health.show-details=when-authorized
+```
+
+### Event-Driven State Changes — Kafka *(for microservices / audit trail)*
+
+Publish a domain event on every state change so downstream services (audit log, notifications, analytics) can react without coupling to this service:
+
+```java
+public record DeviceStateChangedEvent(Long deviceId, DeviceState from, DeviceState to, Instant at) {}
+```
 
 ---
 

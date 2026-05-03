@@ -6,6 +6,7 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
+@Table(name = "device")
 public class Device {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -15,11 +16,16 @@ public class Device {
     private String brand;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "state")
     private DeviceState state;
 
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
+    // Optimistic locking — prevents lost updates under concurrent modification.
+    // The client receives the current version in DeviceResponse and must
+    // include it in PUT/PATCH requests. If two clients update the same device
+    // simultaneously, the second one gets a 409 CONCURRENT_MODIFICATION.
     @Version
     private Long version;
 

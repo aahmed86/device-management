@@ -3,6 +3,7 @@ package com.device.management.mapper;
 import com.device.management.dto.DevicePatchRequest;
 import com.device.management.dto.DeviceRequest;
 import com.device.management.dto.DeviceResponse;
+import com.device.management.dto.DeviceUpdateRequest;
 import com.device.management.model.Device;
 import org.springframework.stereotype.Component;
 
@@ -10,6 +11,14 @@ import org.springframework.stereotype.Component;
 public class DeviceMapper {
 
     public Device toEntity(DeviceRequest request) {
+        Device device = new Device();
+        device.setName(request.name());
+        device.setBrand(request.brand());
+        device.setState(request.state());
+        return device;
+    }
+
+    public Device toEntity(DeviceUpdateRequest request) {
         Device device = new Device();
         device.setName(request.name());
         device.setBrand(request.brand());
